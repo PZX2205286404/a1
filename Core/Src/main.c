@@ -182,6 +182,7 @@ int main(void)
   /* Initialize all configured peripherals */
 	MX_RTC_Init();              /* 硬件 RTC 初始化，使 RTC 开始走时 */
 	fal_init();
+//	fal_part_test();           /* FAL 分区测试：列出分区 + boot/app 读写验证 */
 	littlefs_test();
 //	flashdb_init_demo();
 //	flashdb_demo();

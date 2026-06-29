@@ -374,3 +374,105 @@ void tsdb_test_start_sender(void)
         rt_kprintf("[TSDB] sender task create failed!\n");
     }
 }
+
+/* ============ FAL 分区测试 ============ */
+
+#define TEST_BUF_SIZE    256
+
+static int part_rw_test(const char *part_name)
+{
+    const struct fal_partition *part;
+    uint8_t write_buf[TEST_BUF_SIZE];
+    uint8_t read_buf[TEST_BUF_SIZE];
+    int i;
+    int rc;
+    uint32_t test_addr;
+
+    part = fal_partition_find(part_name);
+    if (part == NULL) {
+        rt_kprintf("[Part Test] ERROR: partition '%s' not found!\n", part_name);
+        return -1;
+    }
+
+    rt_kprintf("[Part Test] -- testing '%s' --\n", part_name);
+    rt_kprintf("  offset = 0x%08X, len = %u bytes (%u KB)\n",
+               (unsigned)part->offset, (unsigned)part->len,
+               (unsigned)(part->len / 1024));
+
+    if (part->len < TEST_BUF_SIZE) {
+        rt_kprintf("  SKIP: partition too small (< %u bytes)\n", TEST_BUF_SIZE);
+        return 0;
+    }
+
+    test_addr = part->len - TEST_BUF_SIZE;
+
+    for (i = 0; i < TEST_BUF_SIZE; i++) {
+        write_buf[i] = (uint8_t)(i & 0xFF);
+    }
+
+    rc = fal_partition_erase(part, test_addr, TEST_BUF_SIZE);
+    if (rc < 0) {
+        rt_kprintf("  ERROR: erase failed at 0x%08X, rc=%d\n",
+                   (unsigned)test_addr, rc);
+        return -2;
+    }
+
+    rc = fal_partition_write(part, test_addr, write_buf, TEST_BUF_SIZE);
+    if (rc < 0) {
+        rt_kprintf("  ERROR: write failed at 0x%08X, rc=%d\n",
+                   (unsigned)test_addr, rc);
+        return -3;
+    }
+
+    memset(read_buf, 0, sizeof(read_buf));
+    rc = fal_partition_read(part, test_addr, read_buf, TEST_BUF_SIZE);
+    if (rc < 0) {
+        rt_kprintf("  ERROR: read failed at 0x%08X, rc=%d\n",
+                   (unsigned)test_addr, rc);
+        return -4;
+    }
+
+    for (i = 0; i < TEST_BUF_SIZE; i++) {
+        if (read_buf[i] != write_buf[i]) {
+            rt_kprintf("  ERROR: data mismatch at offset %d (write=0x%02X, read=0x%02X)\n",
+                       i, write_buf[i], read_buf[i]);
+            return -5;
+        }
+    }
+
+    rt_kprintf("  OK: read/write/erase all passed!\n");
+    return 0;
+}
+
+void fal_part_test(void)
+{
+    const struct fal_partition *table;
+    size_t len, i;
+
+    rt_kprintf("\n========== FAL Partition Test ==========\n");
+
+    table = fal_get_partition_table(&len);
+    if (table == NULL || len == 0) {
+        rt_kprintf("[Part Test] ERROR: partition table is empty!\n");
+        return;
+    }
+
+    rt_kprintf("\n[Part List] total %u partitions:\n", (unsigned)len);
+    for (i = 0; i < len; i++) {
+        rt_kprintf("  [%u] %-12s  flash=%-12s  offset=0x%08X  size=%8u (%u KB)\n",
+                   (unsigned)i,
+                   table[i].name,
+                   table[i].flash_name,
+                   (unsigned)table[i].offset,
+                   (unsigned)table[i].len,
+                   (unsigned)(table[i].len / 1024));
+    }
+
+    rt_kprintf("\n[Read/Write Test]\n");
+    part_rw_test("boot");
+    part_rw_test("app");
+
+    rt_kprintf("\n========== FAL Partition Test End ==========\n\n");
+}
+
+MSH_CMD_EXPORT_ALIAS(fal_part_test, fal_test, test all FAL partitions);
