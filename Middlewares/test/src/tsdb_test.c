@@ -377,7 +377,8 @@ void tsdb_test_start_sender(void)
 
 /* ============ FAL 分区测试 ============ */
 
-#define TEST_BUF_SIZE    4
+#define TEST_ERASE_SIZE    4096    /* SPI Flash 最小擦除单位: 1 个扇区 4KB */
+#define TEST_BUF_SIZE      64      /* 测试读写的字节数 */
 
 static int part_rw_test(const char *part_name)
 {
@@ -399,23 +400,24 @@ static int part_rw_test(const char *part_name)
                (unsigned)part->offset, (unsigned)part->len,
                (unsigned)(part->len / 1024));
 
-    if (part->len < TEST_BUF_SIZE) {
-        rt_kprintf("  SKIP: partition too small (< %u bytes)\n", TEST_BUF_SIZE);
+    if (part->len < TEST_ERASE_SIZE) {
+        rt_kprintf("  SKIP: partition too small (< %u bytes)\n", TEST_ERASE_SIZE);
         return 0;
     }
 
-    test_addr = 0;  /* 测试分区起始地址 */
+    test_addr = 0;  /* 测试分区起始地址 (必须 4KB 对齐) */
 
     for (i = 0; i < TEST_BUF_SIZE; i++) {
         write_buf[i] = (uint8_t)(0x5A + i);
     }
 
-    rt_kprintf("  erasing %u bytes at 0x%08X...\n", TEST_BUF_SIZE, (unsigned)test_addr);
-    rc = fal_partition_erase(part, test_addr, TEST_BUF_SIZE);
+    rt_kprintf("  erasing %u bytes (1 sector) at 0x%08X...\n", TEST_ERASE_SIZE, (unsigned)test_addr);
+    rc = fal_partition_erase(part, test_addr, TEST_ERASE_SIZE);
     if (rc < 0) {
         rt_kprintf("  ERROR: erase failed, rc=%d\n", rc);
         return -2;
     }
+    rt_kprintf("  erase OK\n");
 
     rt_kprintf("  writing %u bytes at 0x%08X...\n", TEST_BUF_SIZE, (unsigned)test_addr);
     rc = fal_partition_write(part, test_addr, write_buf, TEST_BUF_SIZE);
@@ -423,6 +425,7 @@ static int part_rw_test(const char *part_name)
         rt_kprintf("  ERROR: write failed, rc=%d\n", rc);
         return -3;
     }
+    rt_kprintf("  write OK, returned %d\n", rc);
 
     memset(read_buf, 0, sizeof(read_buf));
     rt_kprintf("  reading %u bytes at 0x%08X...\n", TEST_BUF_SIZE, (unsigned)test_addr);
@@ -431,6 +434,7 @@ static int part_rw_test(const char *part_name)
         rt_kprintf("  ERROR: read failed, rc=%d\n", rc);
         return -4;
     }
+    rt_kprintf("  read OK, returned %d\n", rc);
 
     rt_kprintf("  write_buf: ");
     for (i = 0; i < TEST_BUF_SIZE; i++) {
