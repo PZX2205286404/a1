@@ -7,6 +7,7 @@
 #include "fal.h"
 #include "flashdb.h"
 #include "rtc.h"
+#include "sfud.h"
 #include <rtthread.h>
 #include <string.h>
 
@@ -464,6 +465,10 @@ void fal_part_test(void)
 {
     const struct fal_partition *table;
     size_t len, i;
+    sfud_flash_t sfud_dev;
+    uint8_t wbuf[16], rbuf[16];
+    sfud_err err;
+    int j;
 
     rt_kprintf("\n========== FAL Partition Test ==========\n");
 
@@ -484,7 +489,45 @@ void fal_part_test(void)
                    (unsigned)(table[i].len / 1024));
     }
 
-    rt_kprintf("\n[Read/Write Test]\n");
+    rt_kprintf("\n=== SFUD Direct Test (bypass FAL) ===\n");
+    sfud_dev = sfud_get_device(0);
+    if (sfud_dev == NULL || !sfud_dev->init_ok) {
+        rt_kprintf("[SFUD Test] ERROR: sfud device not ready!\n");
+        return;
+    }
+    rt_kprintf("[SFUD Test] chip: %s, capacity: %u bytes\n",
+               sfud_dev->chip.name, (unsigned)sfud_dev->chip.capacity);
+
+    for (j = 0; j < 16; j++) {
+        wbuf[j] = (uint8_t)(0xA0 + j);
+    }
+
+    rt_kprintf("[SFUD Test] erasing 4KB at 0x00000000...\n");
+    err = sfud_erase(sfud_dev, 0, 4096);
+    rt_kprintf("[SFUD Test] erase result: %d (0=success)\n", err);
+
+    rt_kprintf("[SFUD Test] writing 16 bytes at 0x00000000...\n");
+    err = sfud_write(sfud_dev, 0, 16, wbuf);
+    rt_kprintf("[SFUD Test] write result: %d (0=success)\n", err);
+
+    memset(rbuf, 0, sizeof(rbuf));
+    rt_kprintf("[SFUD Test] reading 16 bytes at 0x00000000...\n");
+    err = sfud_read(sfud_dev, 0, 16, rbuf);
+    rt_kprintf("[SFUD Test] read result: %d (0=success)\n", err);
+
+    rt_kprintf("  write: ");
+    for (j = 0; j < 16; j++) rt_kprintf("%02X ", wbuf[j]);
+    rt_kprintf("\n  read:  ");
+    for (j = 0; j < 16; j++) rt_kprintf("%02X ", rbuf[j]);
+    rt_kprintf("\n");
+
+    if (memcmp(wbuf, rbuf, 16) == 0) {
+        rt_kprintf("[SFUD Test] OK: SFUD read/write works!\n");
+    } else {
+        rt_kprintf("[SFUD Test] FAIL: SFUD read/write mismatch!\n");
+    }
+
+    rt_kprintf("\n[Read/Write Test via FAL]\n");
     part_rw_test("boot");
     part_rw_test("app");
 
