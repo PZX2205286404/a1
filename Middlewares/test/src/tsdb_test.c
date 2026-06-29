@@ -377,7 +377,7 @@ void tsdb_test_start_sender(void)
 
 /* ============ FAL 分区测试 ============ */
 
-#define TEST_BUF_SIZE    256
+#define TEST_BUF_SIZE    4
 
 static int part_rw_test(const char *part_name)
 {
@@ -404,33 +404,45 @@ static int part_rw_test(const char *part_name)
         return 0;
     }
 
-    test_addr = part->len - TEST_BUF_SIZE;
+    test_addr = 0;  /* 测试分区起始地址 */
 
     for (i = 0; i < TEST_BUF_SIZE; i++) {
-        write_buf[i] = (uint8_t)(i & 0xFF);
+        write_buf[i] = (uint8_t)(0x5A + i);
     }
 
+    rt_kprintf("  erasing %u bytes at 0x%08X...\n", TEST_BUF_SIZE, (unsigned)test_addr);
     rc = fal_partition_erase(part, test_addr, TEST_BUF_SIZE);
     if (rc < 0) {
-        rt_kprintf("  ERROR: erase failed at 0x%08X, rc=%d\n",
-                   (unsigned)test_addr, rc);
+        rt_kprintf("  ERROR: erase failed, rc=%d\n", rc);
         return -2;
     }
 
+    rt_kprintf("  writing %u bytes at 0x%08X...\n", TEST_BUF_SIZE, (unsigned)test_addr);
     rc = fal_partition_write(part, test_addr, write_buf, TEST_BUF_SIZE);
     if (rc < 0) {
-        rt_kprintf("  ERROR: write failed at 0x%08X, rc=%d\n",
-                   (unsigned)test_addr, rc);
+        rt_kprintf("  ERROR: write failed, rc=%d\n", rc);
         return -3;
     }
 
     memset(read_buf, 0, sizeof(read_buf));
+    rt_kprintf("  reading %u bytes at 0x%08X...\n", TEST_BUF_SIZE, (unsigned)test_addr);
     rc = fal_partition_read(part, test_addr, read_buf, TEST_BUF_SIZE);
     if (rc < 0) {
-        rt_kprintf("  ERROR: read failed at 0x%08X, rc=%d\n",
-                   (unsigned)test_addr, rc);
+        rt_kprintf("  ERROR: read failed, rc=%d\n", rc);
         return -4;
     }
+
+    rt_kprintf("  write_buf: ");
+    for (i = 0; i < TEST_BUF_SIZE; i++) {
+        rt_kprintf("%02X ", write_buf[i]);
+    }
+    rt_kprintf("\n");
+
+    rt_kprintf("  read_buf:  ");
+    for (i = 0; i < TEST_BUF_SIZE; i++) {
+        rt_kprintf("%02X ", read_buf[i]);
+    }
+    rt_kprintf("\n");
 
     for (i = 0; i < TEST_BUF_SIZE; i++) {
         if (read_buf[i] != write_buf[i]) {
