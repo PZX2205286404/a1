@@ -31,47 +31,24 @@ static struct fdb_default_kv_node s_boot_default_kv[] = {
     {"version",   "v1.0.0", sizeof("v1.0.0") - 1},
 };
 
-/* 前向声明：在 boot_kvdb_test 之后定义的 static 函数 */
+/* 前向声明 */
 static fdb_time_t tsdb_test_get_time(void);
-
-/* 带分区名的 TSDB 打印回调 */
-static bool tsdb_iter_print_with_part(fdb_tsl_t tsl, void *arg)
-{
-    const char *part_name = (const char *)arg;
-    uint8_t buf[TSDB_MAX_LOG_LEN + 1];
-    char    dt_buf[DT_BUF_SIZE];
-    struct fdb_blob blob;
-
-    memset(buf, 0, sizeof(buf));
-    fdb_tsl_to_blob(tsl, fdb_blob_make(&blob, buf, TSDB_MAX_LOG_LEN));
-    fdb_blob_read((fdb_db_t)&s_tsdb, &blob);
-
-    unix_sec_to_datetime((uint32_t)tsl->time, dt_buf, sizeof(dt_buf));
-
-    rt_kprintf("[%s/TSDB] time=%s  len=%u  data: ",
-               part_name,
-               dt_buf,
-               (unsigned)tsl->log_len);
-    for (uint32_t i = 0; i  < tsl->log_len; i++) {
-        rt_kprintf("%c", buf[i]);
-    }
-    rt_kprintf("\n");
-
-    return false;
-}
+static void unix_sec_to_datetime(uint32_t sec, char *buf, int size);
 
 static void boot_kvdb_test(void)
 {
     struct fdb_blob blob;
-    char msg_buf[64] = {0};
-    char verify_buf[64] = {0};
+    char msg_buf[128] = {0};
+    char verify_buf[128] = {0};
+    char dt_buf[DT_BUF_SIZE];
     int32_t msg_count = 0;
     fdb_err_t err;
     size_t read_len;
+    uint32_t now;
 
-    rt_kprintf("\n========== KVDB + TSDB Test ==========\n");
+    rt_kprintf("\n========== KVDB Test (boot partition) ==========\n");
 
-    /* ========== KVDB 测试 ========== */
+    /* ========== KVDB 初始化 ========== */
     rt_kprintf("\n[boot/KVDB] Initializing on boot partition...\n");
 
     struct fdb_default_kv default_kv;
@@ -109,9 +86,11 @@ static void boot_kvdb_test(void)
         msg_count = 0;
     }
 
-    /* 生成新消息并写入 KVDB */
+    /* 生成新消息（带时间戳）并写入 KVDB */
     msg_count++;
-    rt_sprintf(msg_buf, "this is No.%d message", msg_count);
+    now = (uint32_t)rtc_get_unix_sec();
+    unix_sec_to_datetime(now, dt_buf, sizeof(dt_buf));
+    rt_snprintf(msg_buf, sizeof(msg_buf), "this is No.%d message | %s", msg_count, dt_buf);
     fdb_kv_set_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, msg_buf, strlen(msg_buf)));
     rt_kprintf("[boot/KVDB] Saved new msg: %s\n", msg_buf);
 
@@ -127,27 +106,6 @@ static void boot_kvdb_test(void)
             rt_kprintf("[boot/KVDB] Verification FAILED! mismatch\n");
         }
     }
-
-    /* ========== TSDB 测试 ========== */
-    rt_kprintf("\n[fdb_tsdb1/TSDB] Initializing on fdb_tsdb1 partition...\n");
-
-    err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
-                        tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
-    if (err != FDB_NO_ERR) {
-        rt_kprintf("[fdb_tsdb1/TSDB] Init failed, err=%d\n", err);
-        return;
-    }
-    s_init_ok = true;
-    rt_kprintf("[fdb_tsdb1/TSDB] Init OK\n");
-
-    /* 保存当前消息到 TSDB（带时间戳） */
-    rt_kprintf("\n[fdb_tsdb1/TSDB] Saving message: %s\n", msg_buf);
-    tsdb_test_save(msg_buf, strlen(msg_buf));
-
-    /* 显示所有带时间戳的消息 */
-    rt_kprintf("\n[fdb_tsdb1/TSDB] ===== All Messages (from fdb_tsdb1 partition) =====\n");
-    fdb_tsl_iter(&s_tsdb, tsdb_iter_print_with_part, (void *)"fdb_tsdb1");
-    rt_kprintf("[fdb_tsdb1/TSDB] ===== End =====\n");
 
     rt_kprintf("\n========== Test Complete ==========\n\n");
 }
