@@ -34,9 +34,11 @@ static struct fdb_default_kv_node s_boot_default_kv[] = {
 static void boot_kvdb_test(void)
 {
     struct fdb_blob blob;
-    int32_t boot_count = 0;
-    char version_buf[32] = {0};
+    char msg_buf[64] = {0};
+    char verify_buf[64] = {0};
+    int32_t msg_count = 0;
     fdb_err_t err;
+    size_t read_len;
 
     rt_kprintf("\n[Boot KVDB] Testing FlashDB KVDB on boot partition...\n");
 
@@ -48,7 +50,6 @@ static void boot_kvdb_test(void)
     err = fdb_kvdb_init(&s_boot_kvdb, BOOT_KVDB_NAME, BOOT_PART_NAME, &default_kv, NULL);
     if (err != FDB_NO_ERR) {
         rt_kprintf("[Boot KVDB] Init failed (err=%d), try erasing and retry...\n", err);
-        /* 初始化失败则擦除后重试 */
         const struct fal_partition *part = fal_partition_find(BOOT_PART_NAME);
         if (part != NULL) {
             fal_partition_erase_all(part);
@@ -62,33 +63,41 @@ static void boot_kvdb_test(void)
     s_boot_kvdb_ok = true;
     rt_kprintf("[Boot KVDB] Init OK\n");
 
-    /* 读取 boot_count */
-    fdb_kv_get_blob(&s_boot_kvdb, "boot_count", fdb_blob_make(&blob, &boot_count, sizeof(boot_count)));
-    if (blob.saved.len > 0) {
-        rt_kprintf("[Boot KVDB] Current boot_count: %d\n", boot_count);
+    /* 读取已存的消息 */
+    read_len = fdb_kv_get_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, msg_buf, sizeof(msg_buf) - 1));
+    if (read_len > 0) {
+        msg_buf[read_len] = '\0';
+        rt_kprintf("[Boot KVDB] Current msg: %s\n", msg_buf);
+        /* 从消息中解析计数 */
+        if (sscanf(msg_buf, "this is No.%ld message", &msg_count) == 1) {
+            rt_kprintf("[Boot KVDB] Parsed count: %ld\n", (long)msg_count);
+        } else {
+            msg_count = 0;
+        }
     } else {
-        rt_kprintf("[Boot KVDB] First boot, boot_count = 0\n");
-        boot_count = 0;
+        rt_kprintf("[Boot KVDB] No message found, starting from 0\n");
+        msg_count = 0;
     }
 
-    /* 增加 boot_count 并保存 */
-    boot_count++;
-    fdb_kv_set_blob(&s_boot_kvdb, "boot_count", fdb_blob_make(&blob, &boot_count, sizeof(boot_count)));
-    rt_kprintf("[Boot KVDB] Saved new boot_count: %d\n", boot_count);
+    /* 生成新消息并写入 */
+    msg_count++;
+    rt_sprintf(msg_buf, "this is No.%d message", msg_count);
+    fdb_kv_set_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, msg_buf, strlen(msg_buf)));
+    rt_kprintf("[Boot KVDB] Saved new msg: %s\n", msg_buf);
 
-    /* 读取 version */
-    fdb_kv_get_blob(&s_boot_kvdb, "version", fdb_blob_make(&blob, version_buf, sizeof(version_buf)));
-    if (blob.saved.len > 0) {
-        rt_kprintf("[Boot KVDB] Version: %s\n", version_buf);
-    }
-
-    /* 验证数据 */
-    memset(&boot_count, 0, sizeof(boot_count));
-    fdb_kv_get_blob(&s_boot_kvdb, "boot_count", fdb_blob_make(&blob, &boot_count, sizeof(boot_count)));
-    if (boot_count > 0) {
-        rt_kprintf("[Boot KVDB] Verification OK! boot_count = %d\n", boot_count);
+    /* 读出来验证 */
+    memset(verify_buf, 0, sizeof(verify_buf));
+    read_len = fdb_kv_get_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, verify_buf, sizeof(verify_buf) - 1));
+    if (read_len > 0) {
+        verify_buf[read_len] = '\0';
+        rt_kprintf("[Boot KVDB] Read back: %s\n", verify_buf);
+        if (strcmp(msg_buf, verify_buf) == 0) {
+            rt_kprintf("[Boot KVDB] Verification OK!\n");
+        } else {
+            rt_kprintf("[Boot KVDB] Verification FAILED! mismatch\n");
+        }
     } else {
-        rt_kprintf("[Boot KVDB] Verification FAILED!\n");
+        rt_kprintf("[Boot KVDB] Verification FAILED! nothing read back\n");
     }
 
     rt_kprintf("[Boot KVDB] Test complete!\n");
