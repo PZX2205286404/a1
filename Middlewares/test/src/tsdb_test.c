@@ -33,7 +33,32 @@ static struct fdb_default_kv_node s_boot_default_kv[] = {
 
 /* 前向声明：在 boot_kvdb_test 之后定义的 static 函数 */
 static fdb_time_t tsdb_test_get_time(void);
-static bool iter_print_cb(fdb_tsl_t tsl, void *arg);
+
+/* 带分区名的 TSDB 打印回调 */
+static bool tsdb_iter_print_with_part(fdb_tsl_t tsl, void *arg)
+{
+    const char *part_name = (const char *)arg;
+    uint8_t buf[TSDB_MAX_LOG_LEN + 1];
+    char    dt_buf[DT_BUF_SIZE];
+    struct fdb_blob blob;
+
+    memset(buf, 0, sizeof(buf));
+    fdb_tsl_to_blob(tsl, fdb_blob_make(&blob, buf, TSDB_MAX_LOG_LEN));
+    fdb_blob_read((fdb_db_t)&s_tsdb, &blob);
+
+    unix_sec_to_datetime((uint32_t)tsl->time, dt_buf, sizeof(dt_buf));
+
+    rt_kprintf("[%s/TSDB] time=%s  len=%u  data: ",
+               part_name,
+               dt_buf,
+               (unsigned)tsl->log_len);
+    for (uint32_t i = 0; i  < tsl->log_len; i++) {
+        rt_kprintf("%c", buf[i]);
+    }
+    rt_kprintf("\n");
+
+    return false;
+}
 
 static void boot_kvdb_test(void)
 {
@@ -47,7 +72,7 @@ static void boot_kvdb_test(void)
     rt_kprintf("\n========== KVDB + TSDB Test ==========\n");
 
     /* ========== KVDB 测试 ========== */
-    rt_kprintf("\n[KVDB] Initializing on boot partition...\n");
+    rt_kprintf("\n[boot/KVDB] Initializing on boot partition...\n");
 
     struct fdb_default_kv default_kv;
     default_kv.kvs = s_boot_default_kv;
@@ -55,19 +80,19 @@ static void boot_kvdb_test(void)
 
     err = fdb_kvdb_init(&s_boot_kvdb, BOOT_KVDB_NAME, BOOT_PART_NAME, &default_kv, NULL);
     if (err != FDB_NO_ERR) {
-        rt_kprintf("[KVDB] Init failed (err=%d), try erasing and retry...\n", err);
+        rt_kprintf("[boot/KVDB] Init failed (err=%d), try erasing and retry...\n", err);
         const struct fal_partition *part = fal_partition_find(BOOT_PART_NAME);
         if (part != NULL) {
             fal_partition_erase_all(part);
         }
         err = fdb_kvdb_init(&s_boot_kvdb, BOOT_KVDB_NAME, BOOT_PART_NAME, &default_kv, NULL);
         if (err != FDB_NO_ERR) {
-            rt_kprintf("[KVDB] Init still failed, err=%d\n", err);
+            rt_kprintf("[boot/KVDB] Init still failed, err=%d\n", err);
             return;
         }
     }
     s_boot_kvdb_ok = true;
-    rt_kprintf("[KVDB] Init OK\n");
+    rt_kprintf("[boot/KVDB] Init OK\n");
 
     /* 读取已存的消息 */
     read_len = fdb_kv_get_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, msg_buf, sizeof(msg_buf) - 1));
@@ -104,25 +129,25 @@ static void boot_kvdb_test(void)
     }
 
     /* ========== TSDB 测试 ========== */
-    rt_kprintf("\n[app/TSDB] Initializing on app partition...\n");
+    rt_kprintf("\n[fdb_tsdb1/TSDB] Initializing on fdb_tsdb1 partition...\n");
 
-    err = fdb_tsdb_init(&s_tsdb, "app_tsdb", "app",
+    err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
                         tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
     if (err != FDB_NO_ERR) {
-        rt_kprintf("[app/TSDB] Init failed, err=%d\n", err);
+        rt_kprintf("[fdb_tsdb1/TSDB] Init failed, err=%d\n", err);
         return;
     }
     s_init_ok = true;
-    rt_kprintf("[app/TSDB] Init OK\n");
+    rt_kprintf("[fdb_tsdb1/TSDB] Init OK\n");
 
     /* 保存当前消息到 TSDB（带时间戳） */
-    rt_kprintf("\n[app/TSDB] Saving message: %s\n", msg_buf);
+    rt_kprintf("\n[fdb_tsdb1/TSDB] Saving message: %s\n", msg_buf);
     tsdb_test_save(msg_buf, strlen(msg_buf));
 
     /* 显示所有带时间戳的消息 */
-    rt_kprintf("\n[app/TSDB] ===== All Messages (from app partition) =====\n");
-    fdb_tsl_iter(&s_tsdb, iter_print_cb, NULL);
-    rt_kprintf("[app/TSDB] ===== End =====\n");
+    rt_kprintf("\n[fdb_tsdb1/TSDB] ===== All Messages (from fdb_tsdb1 partition) =====\n");
+    fdb_tsl_iter(&s_tsdb, tsdb_iter_print_with_part, (void *)"fdb_tsdb1");
+    rt_kprintf("[fdb_tsdb1/TSDB] ===== End =====\n");
 
     rt_kprintf("\n========== Test Complete ==========\n\n");
 }
