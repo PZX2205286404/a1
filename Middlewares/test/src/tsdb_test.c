@@ -31,6 +31,10 @@ static struct fdb_default_kv_node s_boot_default_kv[] = {
     {"version",   "v1.0.0", sizeof("v1.0.0") - 1},
 };
 
+/* 前向声明：在 boot_kvdb_test 之后定义的 static 函数 */
+static fdb_time_t tsdb_test_get_time(void);
+static bool iter_print_cb(fdb_tsl_t tsl, void *arg);
+
 static void boot_kvdb_test(void)
 {
     struct fdb_blob blob;
