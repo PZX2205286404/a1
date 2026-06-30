@@ -73,14 +73,14 @@ static void boot_kvdb_test(void)
     read_len = fdb_kv_get_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, msg_buf, sizeof(msg_buf) - 1));
     if (read_len > 0) {
         msg_buf[read_len] = '\0';
-        rt_kprintf("[KVDB] Current msg: %s\n", msg_buf);
+        rt_kprintf("[boot/KVDB] Current msg: %s\n", msg_buf);
         if (sscanf(msg_buf, "this is No.%ld message", &msg_count) == 1) {
-            rt_kprintf("[KVDB] Parsed count: %ld\n", (long)msg_count);
+            rt_kprintf("[boot/KVDB] Parsed count: %ld\n", (long)msg_count);
         } else {
             msg_count = 0;
         }
     } else {
-        rt_kprintf("[KVDB] No message found, starting from 0\n");
+        rt_kprintf("[boot/KVDB] No message found, starting from 0\n");
         msg_count = 0;
     }
 
@@ -88,41 +88,41 @@ static void boot_kvdb_test(void)
     msg_count++;
     rt_sprintf(msg_buf, "this is No.%d message", msg_count);
     fdb_kv_set_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, msg_buf, strlen(msg_buf)));
-    rt_kprintf("[KVDB] Saved new msg: %s\n", msg_buf);
+    rt_kprintf("[boot/KVDB] Saved new msg: %s\n", msg_buf);
 
     /* 读出来验证 */
     memset(verify_buf, 0, sizeof(verify_buf));
     read_len = fdb_kv_get_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, verify_buf, sizeof(verify_buf) - 1));
     if (read_len > 0) {
         verify_buf[read_len] = '\0';
-        rt_kprintf("[KVDB] Read back: %s\n", verify_buf);
+        rt_kprintf("[boot/KVDB] Read back: %s\n", verify_buf);
         if (strcmp(msg_buf, verify_buf) == 0) {
-            rt_kprintf("[KVDB] Verification OK!\n");
+            rt_kprintf("[boot/KVDB] Verification OK!\n");
         } else {
-            rt_kprintf("[KVDB] Verification FAILED! mismatch\n");
+            rt_kprintf("[boot/KVDB] Verification FAILED! mismatch\n");
         }
     }
 
     /* ========== TSDB 测试 ========== */
-    rt_kprintf("\n[TSDB] Initializing on fdb_tsdb1 partition...\n");
+    rt_kprintf("\n[app/TSDB] Initializing on app partition...\n");
 
-    err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+    err = fdb_tsdb_init(&s_tsdb, "app_tsdb", "app",
                         tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
     if (err != FDB_NO_ERR) {
-        rt_kprintf("[TSDB] Init failed, err=%d\n", err);
+        rt_kprintf("[app/TSDB] Init failed, err=%d\n", err);
         return;
     }
     s_init_ok = true;
-    rt_kprintf("[TSDB] Init OK\n");
+    rt_kprintf("[app/TSDB] Init OK\n");
 
     /* 保存当前消息到 TSDB（带时间戳） */
-    rt_kprintf("\n[TSDB] Saving message: %s\n", msg_buf);
+    rt_kprintf("\n[app/TSDB] Saving message: %s\n", msg_buf);
     tsdb_test_save(msg_buf, strlen(msg_buf));
 
     /* 显示所有带时间戳的消息 */
-    rt_kprintf("\n[TSDB] ===== All Messages =====\n");
+    rt_kprintf("\n[app/TSDB] ===== All Messages (from app partition) =====\n");
     fdb_tsl_iter(&s_tsdb, iter_print_cb, NULL);
-    rt_kprintf("[TSDB] ===== End =====\n");
+    rt_kprintf("[app/TSDB] ===== End =====\n");
 
     rt_kprintf("\n========== Test Complete ==========\n\n");
 }
