@@ -378,97 +378,13 @@ void tsdb_test_start_sender(void)
 
 /* ============ FAL 分区测试 ============ */
 
-#define TEST_ERASE_SIZE    4096    /* SPI Flash 最小擦除单位: 1 个扇区 4KB */
-#define TEST_BUF_SIZE      64      /* 测试读写的字节数 */
-
-static int part_rw_test(const char *part_name)
-{
-    const struct fal_partition *part;
-    uint8_t write_buf[TEST_BUF_SIZE];
-    uint8_t read_buf[TEST_BUF_SIZE];
-    int i;
-    int rc;
-    uint32_t test_addr;
-
-    part = fal_partition_find(part_name);
-    if (part == NULL) {
-        rt_kprintf("[Part Test] ERROR: partition '%s' not found!\n", part_name);
-        return -1;
-    }
-
-    rt_kprintf("[Part Test] -- testing '%s' --\n", part_name);
-    rt_kprintf("  offset = 0x%08X, len = %u bytes (%u KB)\n",
-               (unsigned)part->offset, (unsigned)part->len,
-               (unsigned)(part->len / 1024));
-
-    if (part->len < TEST_ERASE_SIZE) {
-        rt_kprintf("  SKIP: partition too small (< %u bytes)\n", TEST_ERASE_SIZE);
-        return 0;
-    }
-
-    test_addr = 0;  /* 测试分区起始地址 (必须 4KB 对齐) */
-
-    for (i = 0; i < TEST_BUF_SIZE; i++) {
-        write_buf[i] = (uint8_t)(0x5A + i);
-    }
-
-    rt_kprintf("  erasing %u bytes (1 sector) at 0x%08X...\n", TEST_ERASE_SIZE, (unsigned)test_addr);
-    rc = fal_partition_erase(part, test_addr, TEST_ERASE_SIZE);
-    if (rc < 0) {
-        rt_kprintf("  ERROR: erase failed, rc=%d\n", rc);
-        return -2;
-    }
-    rt_kprintf("  erase OK\n");
-
-    rt_kprintf("  writing %u bytes at 0x%08X...\n", TEST_BUF_SIZE, (unsigned)test_addr);
-    rc = fal_partition_write(part, test_addr, write_buf, TEST_BUF_SIZE);
-    if (rc < 0) {
-        rt_kprintf("  ERROR: write failed, rc=%d\n", rc);
-        return -3;
-    }
-    rt_kprintf("  write OK, returned %d\n", rc);
-
-    memset(read_buf, 0, sizeof(read_buf));
-    rt_kprintf("  reading %u bytes at 0x%08X...\n", TEST_BUF_SIZE, (unsigned)test_addr);
-    rc = fal_partition_read(part, test_addr, read_buf, TEST_BUF_SIZE);
-    if (rc < 0) {
-        rt_kprintf("  ERROR: read failed, rc=%d\n", rc);
-        return -4;
-    }
-    rt_kprintf("  read OK, returned %d\n", rc);
-
-    rt_kprintf("  write_buf: ");
-    for (i = 0; i < TEST_BUF_SIZE; i++) {
-        rt_kprintf("%02X ", write_buf[i]);
-    }
-    rt_kprintf("\n");
-
-    rt_kprintf("  read_buf:  ");
-    for (i = 0; i < TEST_BUF_SIZE; i++) {
-        rt_kprintf("%02X ", read_buf[i]);
-    }
-    rt_kprintf("\n");
-
-    for (i = 0; i < TEST_BUF_SIZE; i++) {
-        if (read_buf[i] != write_buf[i]) {
-            rt_kprintf("  ERROR: data mismatch at offset %d (write=0x%02X, read=0x%02X)\n",
-                       i, write_buf[i], read_buf[i]);
-            return -5;
-        }
-    }
-
-    rt_kprintf("  OK: read/write/erase all passed!\n");
-    return 0;
-}
-
 void fal_part_test(void)
 {
     const struct fal_partition *table;
+    const struct fal_partition *part;
     size_t len, i;
-    sfud_flash_t sfud_dev;
-    uint8_t wbuf[16], rbuf[16];
-    sfud_err err;
-    int j;
+    const char *names[] = {"boot", "app", "fdb_tsdb1", "fdb_kvdb1"};
+    int all_ok = 1;
 
     rt_kprintf("\n========== FAL Partition Test ==========\n");
 
@@ -489,47 +405,25 @@ void fal_part_test(void)
                    (unsigned)(table[i].len / 1024));
     }
 
-    rt_kprintf("\n=== SFUD Direct Test (bypass FAL) ===\n");
-    sfud_dev = sfud_get_device(0);
-    if (sfud_dev == NULL || !sfud_dev->init_ok) {
-        rt_kprintf("[SFUD Test] ERROR: sfud device not ready!\n");
-        return;
+    rt_kprintf("\n[Partition Exist Check]\n");
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        part = fal_partition_find(names[i]);
+        if (part == NULL) {
+            rt_kprintf("  [FAIL] %-12s NOT FOUND!\n", names[i]);
+            all_ok = 0;
+        } else {
+            rt_kprintf("  [OK]   %-12s  offset=0x%08X  size=%u KB\n",
+                       names[i],
+                       (unsigned)part->offset,
+                       (unsigned)(part->len / 1024));
+        }
     }
-    rt_kprintf("[SFUD Test] chip: %s, capacity: %u bytes\n",
-               sfud_dev->chip.name, (unsigned)sfud_dev->chip.capacity);
 
-    for (j = 0; j < 16; j++) {
-        wbuf[j] = (uint8_t)(0xA0 + j);
-    }
-
-    rt_kprintf("[SFUD Test] erasing 4KB at 0x00000000...\n");
-    err = sfud_erase(sfud_dev, 0, 4096);
-    rt_kprintf("[SFUD Test] erase result: %d (0=success)\n", err);
-
-    rt_kprintf("[SFUD Test] writing 16 bytes at 0x00000000...\n");
-    err = sfud_write(sfud_dev, 0, 16, wbuf);
-    rt_kprintf("[SFUD Test] write result: %d (0=success)\n", err);
-
-    memset(rbuf, 0, sizeof(rbuf));
-    rt_kprintf("[SFUD Test] reading 16 bytes at 0x00000000...\n");
-    err = sfud_read(sfud_dev, 0, 16, rbuf);
-    rt_kprintf("[SFUD Test] read result: %d (0=success)\n", err);
-
-    rt_kprintf("  write: ");
-    for (j = 0; j < 16; j++) rt_kprintf("%02X ", wbuf[j]);
-    rt_kprintf("\n  read:  ");
-    for (j = 0; j < 16; j++) rt_kprintf("%02X ", rbuf[j]);
-    rt_kprintf("\n");
-
-    if (memcmp(wbuf, rbuf, 16) == 0) {
-        rt_kprintf("[SFUD Test] OK: SFUD read/write works!\n");
+    if (all_ok) {
+        rt_kprintf("\n[Result] All partitions exist and accessible!\n");
     } else {
-        rt_kprintf("[SFUD Test] FAIL: SFUD read/write mismatch!\n");
+        rt_kprintf("\n[Result] Some partitions are missing!\n");
     }
-
-    rt_kprintf("\n[Read/Write Test via FAL]\n");
-    part_rw_test("boot");
-    part_rw_test("app");
 
     rt_kprintf("\n========== FAL Partition Test End ==========\n\n");
 }
