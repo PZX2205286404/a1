@@ -36,8 +36,17 @@ static void boot_kvdb_test(void)
     struct fdb_blob blob;
     int32_t boot_count = 0;
     char version_buf[32] = {0};
+    const struct fal_partition *part;
 
     rt_kprintf("\n[Boot KVDB] Testing FlashDB KVDB on boot partition...\n");
+
+    /* 先擦除 boot 分区，清除之前的脏数据 */
+    part = fal_partition_find(BOOT_PART_NAME);
+    if (part != NULL) {
+        rt_kprintf("[Boot KVDB] Erasing boot partition...\n");
+        fal_partition_erase_all(part);
+        rt_kprintf("[Boot KVDB] Erase done\n");
+    }
 
     /* 初始化 KVDB */
     struct fdb_default_kv default_kv;
