@@ -36,27 +36,28 @@ static void boot_kvdb_test(void)
     struct fdb_blob blob;
     int32_t boot_count = 0;
     char version_buf[32] = {0};
-    const struct fal_partition *part;
+    fdb_err_t err;
 
     rt_kprintf("\n[Boot KVDB] Testing FlashDB KVDB on boot partition...\n");
-
-    /* 先擦除 boot 分区，清除之前的脏数据 */
-    part = fal_partition_find(BOOT_PART_NAME);
-    if (part != NULL) {
-        rt_kprintf("[Boot KVDB] Erasing boot partition...\n");
-        fal_partition_erase_all(part);
-        rt_kprintf("[Boot KVDB] Erase done\n");
-    }
 
     /* 初始化 KVDB */
     struct fdb_default_kv default_kv;
     default_kv.kvs = s_boot_default_kv;
     default_kv.num = sizeof(s_boot_default_kv) / sizeof(s_boot_default_kv[0]);
 
-    fdb_err_t err = fdb_kvdb_init(&s_boot_kvdb, BOOT_KVDB_NAME, BOOT_PART_NAME, &default_kv, NULL);
+    err = fdb_kvdb_init(&s_boot_kvdb, BOOT_KVDB_NAME, BOOT_PART_NAME, &default_kv, NULL);
     if (err != FDB_NO_ERR) {
-        rt_kprintf("[Boot KVDB] Init failed, err=%d\n", err);
-        return;
+        rt_kprintf("[Boot KVDB] Init failed (err=%d), try erasing and retry...\n", err);
+        /* 初始化失败则擦除后重试 */
+        const struct fal_partition *part = fal_partition_find(BOOT_PART_NAME);
+        if (part != NULL) {
+            fal_partition_erase_all(part);
+        }
+        err = fdb_kvdb_init(&s_boot_kvdb, BOOT_KVDB_NAME, BOOT_PART_NAME, &default_kv, NULL);
+        if (err != FDB_NO_ERR) {
+            rt_kprintf("[Boot KVDB] Init still failed, err=%d\n", err);
+            return;
+        }
     }
     s_boot_kvdb_ok = true;
     rt_kprintf("[Boot KVDB] Init OK\n");
