@@ -70,9 +70,15 @@ void tsdb_test_start_sender(void);
 /* ============ FAL 分区测试 ============ */
 
 /**
- * @brief   测试 FAL 分区是否正常：列出所有分区 + 对 boot/app 做读写验证
+ * @brief   测试 FAL 分区是否正常：列出所有分区
  * @note    must call after fal_init()
  */
 void fal_part_test(void);
+
+/**
+ * @brief   FlashDB KVDB 测试：往 boot 分区写数据
+ * @note    must call after fal_init()
+ */
+void boot_kvdb_test(void);
 
 #endif /* __TSDB_TEST_H__ */

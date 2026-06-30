@@ -18,6 +18,72 @@
 #define TSDB_MAX_LOG_LEN    256
 #define DT_BUF_SIZE         32
 
+/* ============ FlashDB KVDB for boot partition ============ */
+
+#define BOOT_KVDB_NAME      "boot_kvdb"
+#define BOOT_PART_NAME      "boot"
+
+static struct fdb_kvdb  s_boot_kvdb;
+static bool             s_boot_kvdb_ok = false;
+
+static struct fdb_default_kv_node s_boot_default_kv[] = {
+    {"boot_count", NULL, 0},
+    {"version",   "v1.0.0", sizeof("v1.0.0") - 1},
+};
+
+static void boot_kvdb_test(void)
+{
+    struct fdb_blob blob;
+    int32_t boot_count = 0;
+    char version_buf[32] = {0};
+
+    rt_kprintf("\n[Boot KVDB] Testing FlashDB KVDB on boot partition...\n");
+
+    /* 初始化 KVDB */
+    struct fdb_default_kv default_kv;
+    default_kv.kvs = s_boot_default_kv;
+    default_kv.num = sizeof(s_boot_default_kv) / sizeof(s_boot_default_kv[0]);
+
+    fdb_err_t err = fdb_kvdb_init(&s_boot_kvdb, BOOT_KVDB_NAME, BOOT_PART_NAME, &default_kv, NULL);
+    if (err != FDB_NO_ERR) {
+        rt_kprintf("[Boot KVDB] Init failed, err=%d\n", err);
+        return;
+    }
+    s_boot_kvdb_ok = true;
+    rt_kprintf("[Boot KVDB] Init OK\n");
+
+    /* 读取 boot_count */
+    fdb_kv_get_blob(&s_boot_kvdb, "boot_count", fdb_blob_make(&blob, &boot_count, sizeof(boot_count)));
+    if (blob.saved.len > 0) {
+        rt_kprintf("[Boot KVDB] Current boot_count: %d\n", boot_count);
+    } else {
+        rt_kprintf("[Boot KVDB] First boot, boot_count = 0\n");
+        boot_count = 0;
+    }
+
+    /* 增加 boot_count 并保存 */
+    boot_count++;
+    fdb_kv_set_blob(&s_boot_kvdb, "boot_count", fdb_blob_make(&blob, &boot_count, sizeof(boot_count)));
+    rt_kprintf("[Boot KVDB] Saved new boot_count: %d\n", boot_count);
+
+    /* 读取 version */
+    fdb_kv_get_blob(&s_boot_kvdb, "version", fdb_blob_make(&blob, version_buf, sizeof(version_buf)));
+    if (blob.saved.len > 0) {
+        rt_kprintf("[Boot KVDB] Version: %s\n", version_buf);
+    }
+
+    /* 验证数据 */
+    memset(&boot_count, 0, sizeof(boot_count));
+    fdb_kv_get_blob(&s_boot_kvdb, "boot_count", fdb_blob_make(&blob, &boot_count, sizeof(boot_count)));
+    if (boot_count > 0) {
+        rt_kprintf("[Boot KVDB] Verification OK! boot_count = %d\n", boot_count);
+    } else {
+        rt_kprintf("[Boot KVDB] Verification FAILED!\n");
+    }
+
+    rt_kprintf("[Boot KVDB] Test complete!\n");
+}
+
 /* ============ global variables ============ */
 
 static struct fdb_tsdb  s_tsdb;
