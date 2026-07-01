@@ -76,9 +76,9 @@ void tsdb_test_start_sender(void);
 void fal_part_test(void);
 
 /**
- * @brief   FlashDB KVDB 测试：往 boot 分区写数据
+ * @brief   简化版 TSDB 测试：存一条消息 + 读最新一条
  * @note    must call after fal_init()
  */
-void boot_kvdb_test(void);
+void tsdb_test_simple(void);
 
 #endif /* __TSDB_TEST_H__ */

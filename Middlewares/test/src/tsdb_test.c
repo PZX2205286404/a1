@@ -255,6 +255,64 @@ void tsdb_test_get_earliest(void)
 MSH_CMD_EXPORT(tsdb_test_get_latest, get latest TSL from TSDB);
 MSH_CMD_EXPORT(tsdb_test_get_earliest, get earliest TSL from TSDB);
 
+/* ============ 简化版 TSDB 测试 ============ */
+
+void tsdb_test_simple(void)
+{
+    fdb_err_t err;
+    char msg_buf[64] = {0};
+    int32_t msg_count = 0;
+
+    rt_kprintf("\n========== TSDB Simple Test (fdb_tsdb1) ==========\n");
+
+    /* 1. 初始化 TSDB */
+    err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                        tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+    if (err != FDB_NO_ERR) {
+        rt_kprintf("[fdb_tsdb1/TSDB] Init failed (err=%d), erasing and retry...\n", err);
+        const struct fal_partition *tsdb_part = fal_partition_find(TSDB_PART_NAME);
+        if (tsdb_part != NULL) {
+            fal_partition_erase_all(tsdb_part);
+        }
+        err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                            tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+        if (err != FDB_NO_ERR) {
+            rt_kprintf("[fdb_tsdb1/TSDB] Init still failed, err=%d\n", err);
+            return;
+        }
+    }
+    s_init_ok = true;
+    rt_kprintf("[fdb_tsdb1/TSDB] Init OK\n");
+
+    /* 2. 从最新一条消息里解析编号，+1 生成新消息 */
+    s_query_result.found = false;
+    fdb_tsl_iter_reverse(&s_tsdb, get_latest_cb, NULL);
+    if (s_query_result.found) {
+        if (sscanf(s_query_result.data, "this is No.%ld message", &msg_count) != 1) {
+            msg_count = 0;
+        }
+        rt_kprintf("[fdb_tsdb1/TSDB] Last msg: %s\n", s_query_result.data);
+    } else {
+        msg_count = 0;
+        rt_kprintf("[fdb_tsdb1/TSDB] No existing data\n");
+    }
+
+    /* 3. 生成新消息并保存 */
+    msg_count++;
+    rt_snprintf(msg_buf, sizeof(msg_buf), "this is No.%d message", msg_count);
+    rt_kprintf("[fdb_tsdb1/TSDB] Saving: %s\n", msg_buf);
+    if (tsdb_test_save(msg_buf, strlen(msg_buf)) != 0) {
+        rt_kprintf("[fdb_tsdb1/TSDB] Save failed!\n");
+        return;
+    }
+
+    /* 4. 读取最新一条并显示 */
+    rt_kprintf("\n[fdb_tsdb1/TSDB] ===== Latest Message =====\n");
+    tsdb_test_get_latest();
+
+    rt_kprintf("\n========== Test Complete ==========\n\n");
+}
+
 /* ============ global variables ============ */
 
 static struct fdb_tsdb  s_tsdb;

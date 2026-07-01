@@ -182,8 +182,8 @@ int main(void)
   /* Initialize all configured peripherals */
 	MX_RTC_Init();              /* 硬件 RTC 初始化，使 RTC 开始走时 */
 	fal_init();
-	fal_part_test();           /* FAL 分区测试：列出分区 + boot/app 读写验证 */
-	boot_kvdb_test();           /* FlashDB KVDB 测试：往 boot 分区写数据 */
+	fal_part_test();           /* FAL 分区测试：列出分区 */
+	tsdb_test_simple();        /* 简化版 TSDB 测试：存一条 + 读最新一条 */
 
   /* USER CODE BEGIN 2 */
 
