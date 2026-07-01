@@ -136,35 +136,74 @@ static void boot_kvdb_test(void)
 
 /* ============ TSDB 查询接口 ============ */
 
+/* 用于保存查询结果 */
+static struct {
+    fdb_tsl_t tsl;
+    char       data[TSDB_MAX_LOG_LEN + 1];
+    char       dt_buf[DT_BUF_SIZE];
+    bool       found;
+} s_query_result = {0};
+
+/**
+ * @brief  获取 TSDB 中最新一条记录的回调（反向遍历，最先遇到的就是最新的）
+ */
+static bool get_latest_cb(fdb_tsl_t tsl, void *arg)
+{
+    struct fdb_blob blob;
+    (void)arg;
+
+    memset(s_query_result.data, 0, sizeof(s_query_result.data));
+    fdb_tsl_to_blob(tsl, fdb_blob_make(&blob, s_query_result.data, TSDB_MAX_LOG_LEN));
+    fdb_blob_read((fdb_db_t)&s_tsdb, &blob);
+    unix_sec_to_datetime((uint32_t)tsl->time, s_query_result.dt_buf, sizeof(s_query_result.dt_buf));
+
+    s_query_result.tsl = tsl;
+    s_query_result.found = true;
+
+    return true;  /* 返回 true 停止遍历 */
+}
+
+/**
+ * @brief  获取 TSDB 中最早一条记录的回调（正向遍历，最先遇到的就是最早的）
+ */
+static bool get_earliest_cb(fdb_tsl_t tsl, void *arg)
+{
+    struct fdb_blob blob;
+    (void)arg;
+
+    memset(s_query_result.data, 0, sizeof(s_query_result.data));
+    fdb_tsl_to_blob(tsl, fdb_blob_make(&blob, s_query_result.data, TSDB_MAX_LOG_LEN));
+    fdb_blob_read((fdb_db_t)&s_tsdb, &blob);
+    unix_sec_to_datetime((uint32_t)tsl->time, s_query_result.dt_buf, sizeof(s_query_result.dt_buf));
+
+    s_query_result.tsl = tsl;
+    s_query_result.found = true;
+
+    return true;  /* 返回 true 停止遍历 */
+}
+
 /**
  * @brief  获取 TSDB 中最新一条记录
  */
 void tsdb_test_get_latest(void)
 {
-    uint8_t buf[TSDB_MAX_LOG_LEN + 1];
-    char    dt_buf[DT_BUF_SIZE];
-    struct fdb_blob blob;
-    fdb_tsl_t tsl;
-
     if (!s_init_ok) {
         rt_kprintf("[TSDB] Not initialized!\n");
         return;
     }
 
-    tsl = fdb_tsl_get_latest((fdb_db_t)&s_tsdb);
-    if (tsl == NULL) {
+    s_query_result.found = false;
+    /* 反向遍历，最先遇到的就是最新的一条 */
+    fdb_tsl_iter_reverse(&s_tsdb, get_latest_cb, NULL);
+
+    if (s_query_result.found) {
+        rt_kprintf("[fdb_tsdb1/TSDB] [LATEST] time=%s  len=%u  data: %s\n",
+                   s_query_result.dt_buf,
+                   (unsigned)s_query_result.tsl->log_len,
+                   s_query_result.data);
+    } else {
         rt_kprintf("[fdb_tsdb1/TSDB] No data found!\n");
-        return;
     }
-
-    memset(buf, 0, sizeof(buf));
-    fdb_tsl_to_blob(tsl, fdb_blob_make(&blob, buf, TSDB_MAX_LOG_LEN));
-    fdb_blob_read((fdb_db_t)&s_tsdb, &blob);
-
-    unix_sec_to_datetime((uint32_t)tsl->time, dt_buf, sizeof(dt_buf));
-
-    rt_kprintf("[fdb_tsdb1/TSDB] [LATEST] time=%s  len=%u  data: %s\n",
-               dt_buf, (unsigned)tsl->log_len, buf);
 }
 
 /**
@@ -172,30 +211,23 @@ void tsdb_test_get_latest(void)
  */
 void tsdb_test_get_earliest(void)
 {
-    uint8_t buf[TSDB_MAX_LOG_LEN + 1];
-    char    dt_buf[DT_BUF_SIZE];
-    struct fdb_blob blob;
-    fdb_tsl_t tsl;
-
     if (!s_init_ok) {
         rt_kprintf("[TSDB] Not initialized!\n");
         return;
     }
 
-    tsl = fdb_tsl_get_earliest((fdb_db_t)&s_tsdb);
-    if (tsl == NULL) {
+    s_query_result.found = false;
+    /* 正向遍历，最先遇到的就是最早的一条 */
+    fdb_tsl_iter(&s_tsdb, get_earliest_cb, NULL);
+
+    if (s_query_result.found) {
+        rt_kprintf("[fdb_tsdb1/TSDB] [EARLIEST] time=%s  len=%u  data: %s\n",
+                   s_query_result.dt_buf,
+                   (unsigned)s_query_result.tsl->log_len,
+                   s_query_result.data);
+    } else {
         rt_kprintf("[fdb_tsdb1/TSDB] No data found!\n");
-        return;
     }
-
-    memset(buf, 0, sizeof(buf));
-    fdb_tsl_to_blob(tsl, fdb_blob_make(&blob, buf, TSDB_MAX_LOG_LEN));
-    fdb_blob_read((fdb_db_t)&s_tsdb, &blob);
-
-    unix_sec_to_datetime((uint32_t)tsl->time, dt_buf, sizeof(dt_buf));
-
-    rt_kprintf("[fdb_tsdb1/TSDB] [EARLIEST] time=%s  len=%u  data: %s\n",
-               dt_buf, (unsigned)tsl->log_len, buf);
 }
 
 MSH_CMD_EXPORT(tsdb_test_get_latest, get latest TSL from TSDB);
