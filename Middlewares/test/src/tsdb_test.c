@@ -398,17 +398,32 @@ int tsdb_test_save(const char *msg, uint16_t len)
     struct fdb_blob blob;
     fdb_err_t err;
     char dt_buf[DT_BUF_SIZE];
+    fdb_time_t now;
+    fdb_time_t last_ts;
 
     if (!s_init_ok || msg == NULL || len == 0 || len > TSDB_MAX_LOG_LEN) {
         return -1;
     }
 
-    err = fdb_tsl_append(&s_tsdb, fdb_blob_make(&blob, (void *)msg, len));
+    /* 获取当前时间 */
+    now = (fdb_time_t)tsdb_test_get_time();
+
+    /* 确保时间戳比上一次大，防止 RTC 重置导致时间倒流 */
+    last_ts = (fdb_time_t)s_tsdb.last_time;
+    if (now <= last_ts) {
+        now = last_ts + 1;
+        unix_sec_to_datetime((uint32_t)now, dt_buf, sizeof(dt_buf));
+        rt_kprintf("[TSDB] Warning: time adjusted to %s (was <= last)\n", dt_buf);
+    }
+
+    /* 使用带时间戳的保存函数 */
+    err = fdb_tsl_append_with_ts(&s_tsdb, fdb_blob_make(&blob, (void *)msg, len), now);
     if (err != FDB_NO_ERR) {
+        rt_kprintf("[TSDB] SAVE FAILED! err=%d\n", err);
         return -2;
     }
 
-    unix_sec_to_datetime((uint32_t)s_tsdb.last_time, dt_buf, sizeof(dt_buf));
+    unix_sec_to_datetime((uint32_t)now, dt_buf, sizeof(dt_buf));
     rt_kprintf("[TSDB] SAVE OK  time=%s  len=%u\n", dt_buf, len);
     return 0;
 }
