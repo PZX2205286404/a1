@@ -109,8 +109,30 @@ static void boot_kvdb_test(void)
     err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
                         tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
     if (err != FDB_NO_ERR) {
-        rt_kprintf("[fdb_tsdb1/TSDB] Init failed, err=%d\n", err);
-        return;
+        rt_kprintf("[fdb_tsdb1/TSDB] Init failed (err=%d), erasing and retry...\n", err);
+        const struct fal_partition *tsdb_part = fal_partition_find(TSDB_PART_NAME);
+        if (tsdb_part != NULL) {
+            fal_partition_erase_all(tsdb_part);
+        }
+        err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                            tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+        if (err != FDB_NO_ERR) {
+            rt_kprintf("[fdb_tsdb1/TSDB] Init still failed, err=%d\n", err);
+            return;
+        }
+    } else {
+        /* Init 成功时也清空一次：避免上次遗留的时间戳比当前 RTC 更大 */
+        rt_kprintf("[fdb_tsdb1/TSDB] Clearing old data...\n");
+        const struct fal_partition *tsdb_part = fal_partition_find(TSDB_PART_NAME);
+        if (tsdb_part != NULL) {
+            fal_partition_erase_all(tsdb_part);
+        }
+        err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                            tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+        if (err != FDB_NO_ERR) {
+            rt_kprintf("[fdb_tsdb1/TSDB] Re-init after erase failed, err=%d\n", err);
+            return;
+        }
     }
     s_init_ok = true;
     rt_kprintf("[fdb_tsdb1/TSDB] Init OK\n");
