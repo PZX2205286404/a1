@@ -313,6 +313,44 @@ void tsdb_test_simple(void)
     rt_kprintf("\n========== Test Complete ==========\n\n");
 }
 
+/* ============ 重置 TSDB（擦除分区 + 重置编号） ============ */
+
+void tsdb_test_reset(void)
+{
+    fdb_err_t err;
+    const struct fal_partition *part;
+
+    rt_kprintf("\n========== TSDB Reset ==========\n");
+    rt_kprintf("[fdb_tsdb1/TSDB] Erasing fdb_tsdb1 partition...\n");
+
+    part = fal_partition_find(TSDB_PART_NAME);
+    if (part == NULL) {
+        rt_kprintf("[fdb_tsdb1/TSDB] ERROR: partition '%s' not found!\n", TSDB_PART_NAME);
+        return;
+    }
+
+    if (fal_partition_erase_all(part) < 0) {
+        rt_kprintf("[fdb_tsdb1/TSDB] ERROR: erase failed!\n");
+        return;
+    }
+    rt_kprintf("[fdb_tsdb1/TSDB] Erase OK\n");
+
+    /* 重新初始化 TSDB */
+    s_init_ok = false;
+    err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                        tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+    if (err != FDB_NO_ERR) {
+        rt_kprintf("[fdb_tsdb1/TSDB] Re-init failed, err=%d\n", err);
+        return;
+    }
+    s_init_ok = true;
+    rt_kprintf("[fdb_tsdb1/TSDB] Re-init OK, No. counter reset to 0\n");
+
+    rt_kprintf("\n========== Reset Complete ==========\n\n");
+}
+
+MSH_CMD_EXPORT(tsdb_test_reset, reset TSDB: erase partition and restart count);
+
 /* ============ global variables ============ */
 
 static struct fdb_tsdb  s_tsdb;

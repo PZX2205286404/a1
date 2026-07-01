@@ -81,4 +81,10 @@ void fal_part_test(void);
  */
 void tsdb_test_simple(void);
 
+/**
+ * @brief   擦除 fdb_tsdb1 分区并重置编号
+ * @note    must call after fal_init()
+ */
+void tsdb_test_reset(void);
+
 #endif /* __TSDB_TEST_H__ */
