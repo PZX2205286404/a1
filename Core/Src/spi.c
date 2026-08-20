@@ -132,6 +132,32 @@ uint8_t SPI1_ReadWriteByte(uint8_t TxData)
 }
 
 /**
+  * @brief  通过 SPI 发送并接收一个字节
+  * @param  TxData: 要发送的字节
+  * @retval 接收到的字节
+  */
+uint8_t SPI_FLASH_SendByte(uint8_t TxData)
+{
+  uint8_t RxData = 0;
+  HAL_StatusTypeDef state;
+
+  state = HAL_SPI_TransmitReceive(&SPI_FLASH, &TxData, &RxData, 1, SPI_LONG_TIMEOUT);
+  if (state != HAL_OK) {
+      RxData = 0xFF;
+  }
+  return RxData;
+}
+
+/**
+  * @brief  通过 SPI 读取一个字节（发送 0xFF 产生时钟）
+  * @retval 接收到的字节
+  */
+uint8_t SPI_FLASH_ReadByte(void)
+{
+  return SPI_FLASH_SendByte(0xFF);
+}
+
+/**
   * @brief  ?? SPI1 ??
   * @param  SPI_BaudRatePrescaler: ???
   */
