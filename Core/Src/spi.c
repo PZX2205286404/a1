@@ -141,7 +141,7 @@ uint8_t SPI_FLASH_SendByte(uint8_t TxData)
   uint8_t RxData = 0;
   HAL_StatusTypeDef state;
 
-  state = HAL_SPI_TransmitReceive(&SPI_FLASH, &TxData, &RxData, 1, SPI_LONG_TIMEOUT);
+  state = HAL_SPI_TransmitReceive(&SPI_FLASH, &TxData, &RxData, 1, SPIT_LONG_TIMEOUT);
   if (state != HAL_OK) {
       RxData = 0xFF;
   }

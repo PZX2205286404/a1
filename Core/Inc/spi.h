@@ -36,7 +36,7 @@ extern SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN Private defines */
 #define SPI_FLASH           hspi1                  /* SPI 句柄别名 */
-#define SPI_LONG_TIMEOUT    1000                   /* SPI 收发超时 (ms) */
+#define SPIT_LONG_TIMEOUT  ((uint32_t)160000)     //((uint32_t)0x8000000)
 /* USER CODE END Private defines */
 
 void MX_SPI1_Init(void);
