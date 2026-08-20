@@ -35,13 +35,15 @@ extern "C" {
 extern SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN Private defines */
-
+#define SPI_FLASH           hspi1                  /* SPI 句柄别名 */
+#define SPIT_LONG_TIMEOUT  ((uint32_t)160000)     //((uint32_t)0x8000000)
 /* USER CODE END Private defines */
 
 void MX_SPI1_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-
+uint8_t SPI_FLASH_SendByte(uint8_t TxData);
+uint8_t SPI_FLASH_ReadByte(void);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

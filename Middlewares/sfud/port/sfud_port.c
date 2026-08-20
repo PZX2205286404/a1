@@ -40,12 +40,12 @@ static sfud_err spi_write_read(const sfud_spi *spi, const uint8_t *write_buf, si
 
     /* ??? */
     for (i = 0; i < write_size; i++) {
-        SPI1_ReadWriteByte(write_buf[i]);
+        SPI_FLASH_SendByte(write_buf[i]);
     }
 
     /* ??? */
     for (i = 0; i < read_size; i++) {
-        read_buf[i] = SPI1_ReadWriteByte(0xFF);
+        read_buf[i] = SPI_FLASH_ReadByte();
     }
 
     cs_release();

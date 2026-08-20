@@ -7,6 +7,7 @@
 #include "fal.h"
 #include "flashdb.h"
 #include "rtc.h"
+#include "sfud.h"
 #include <rtthread.h>
 #include <string.h>
 
@@ -16,6 +17,339 @@
 #define TSDB_NAME           "test_tsdb"
 #define TSDB_MAX_LOG_LEN    256
 #define DT_BUF_SIZE         32
+
+/* ============ FlashDB KVDB for boot partition ============ */
+
+#define BOOT_KVDB_NAME      "boot_kvdb"
+#define BOOT_PART_NAME      "boot"
+
+static struct fdb_kvdb  s_boot_kvdb;
+static bool             s_boot_kvdb_ok = false;
+
+static struct fdb_default_kv_node s_boot_default_kv[] = {
+    {"boot_count", NULL, 0},
+    {"version",   "v1.0.0", sizeof("v1.0.0") - 1},
+};
+
+/* 前向声明 */
+static fdb_time_t tsdb_test_get_time(void);
+static void unix_sec_to_datetime(uint32_t sec, char *buf, int size);
+
+static void boot_kvdb_test(void)
+{
+    struct fdb_blob blob;
+    char msg_buf[128] = {0};
+    char verify_buf[128] = {0};
+    int32_t msg_count = 0;
+    fdb_err_t err;
+    size_t read_len;
+
+    rt_kprintf("\n========== KVDB + TSDB Test ==========\n");
+
+    /* ========== KVDB 测试（boot 分区）========== */
+    rt_kprintf("\n[boot/KVDB] Initializing on boot partition...\n");
+
+    struct fdb_default_kv default_kv;
+    default_kv.kvs = s_boot_default_kv;
+    default_kv.num = sizeof(s_boot_default_kv) / sizeof(s_boot_default_kv[0]);
+
+    err = fdb_kvdb_init(&s_boot_kvdb, BOOT_KVDB_NAME, BOOT_PART_NAME, &default_kv, NULL);
+    if (err != FDB_NO_ERR) {
+        rt_kprintf("[boot/KVDB] Init failed (err=%d), try erasing and retry...\n", err);
+        const struct fal_partition *part = fal_partition_find(BOOT_PART_NAME);
+        if (part != NULL) {
+            fal_partition_erase_all(part);
+        }
+        err = fdb_kvdb_init(&s_boot_kvdb, BOOT_KVDB_NAME, BOOT_PART_NAME, &default_kv, NULL);
+        if (err != FDB_NO_ERR) {
+            rt_kprintf("[boot/KVDB] Init still failed, err=%d\n", err);
+            return;
+        }
+    }
+    s_boot_kvdb_ok = true;
+    rt_kprintf("[boot/KVDB] Init OK\n");
+
+    /* 读取已存的消息 */
+    read_len = fdb_kv_get_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, msg_buf, sizeof(msg_buf) - 1));
+    if (read_len > 0) {
+        msg_buf[read_len] = '\0';
+        rt_kprintf("[boot/KVDB] Current msg: %s\n", msg_buf);
+        if (sscanf(msg_buf, "this is No.%ld message", &msg_count) == 1) {
+            rt_kprintf("[boot/KVDB] Parsed count: %ld\n", (long)msg_count);
+        } else {
+            msg_count = 0;
+        }
+    } else {
+        rt_kprintf("[boot/KVDB] No message found, starting from 0\n");
+        msg_count = 0;
+    }
+
+    /* 生成新消息并写入 KVDB */
+    msg_count++;
+    rt_sprintf(msg_buf, "this is No.%d message", msg_count);
+    fdb_kv_set_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, msg_buf, strlen(msg_buf)));
+    rt_kprintf("[boot/KVDB] Saved new msg: %s\n", msg_buf);
+
+    /* 读出来验证 */
+    memset(verify_buf, 0, sizeof(verify_buf));
+    read_len = fdb_kv_get_blob(&s_boot_kvdb, "msg", fdb_blob_make(&blob, verify_buf, sizeof(verify_buf) - 1));
+    if (read_len > 0) {
+        verify_buf[read_len] = '\0';
+        rt_kprintf("[boot/KVDB] Read back: %s\n", verify_buf);
+        if (strcmp(msg_buf, verify_buf) == 0) {
+            rt_kprintf("[boot/KVDB] Verification OK!\n");
+        } else {
+            rt_kprintf("[boot/KVDB] Verification FAILED! mismatch\n");
+        }
+    }
+
+    /* ========== TSDB 测试（fdb_tsdb1 分区）========== */
+    rt_kprintf("\n[fdb_tsdb1/TSDB] Initializing on fdb_tsdb1 partition...\n");
+
+    err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                        tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+    if (err != FDB_NO_ERR) {
+        rt_kprintf("[fdb_tsdb1/TSDB] Init failed (err=%d), erasing and retry...\n", err);
+        const struct fal_partition *tsdb_part = fal_partition_find(TSDB_PART_NAME);
+        if (tsdb_part != NULL) {
+            fal_partition_erase_all(tsdb_part);
+        }
+        err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                            tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+        if (err != FDB_NO_ERR) {
+            rt_kprintf("[fdb_tsdb1/TSDB] Init still failed, err=%d\n", err);
+            return;
+        }
+    } else {
+        /* Init 成功时也清空一次：避免上次遗留的时间戳比当前 RTC 更大 */
+        rt_kprintf("[fdb_tsdb1/TSDB] Clearing old data...\n");
+        const struct fal_partition *tsdb_part = fal_partition_find(TSDB_PART_NAME);
+        if (tsdb_part != NULL) {
+            fal_partition_erase_all(tsdb_part);
+        }
+        err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                            tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+        if (err != FDB_NO_ERR) {
+            rt_kprintf("[fdb_tsdb1/TSDB] Re-init after erase failed, err=%d\n", err);
+            return;
+        }
+    }
+    s_init_ok = true;
+    rt_kprintf("[fdb_tsdb1/TSDB] Init OK\n");
+
+    /* 保存当前消息到 TSDB（带时间戳） */
+    rt_kprintf("\n[fdb_tsdb1/TSDB] Saving: %s\n", msg_buf);
+    tsdb_test_save(msg_buf, strlen(msg_buf));
+
+    /* 查询示例 1: 获取最新一条 */
+    rt_kprintf("\n[fdb_tsdb1/TSDB] ===== Query: Latest =====\n");
+    tsdb_test_get_latest();
+
+    /* 查询示例 2: 获取最早一条 */
+    rt_kprintf("\n[fdb_tsdb1/TSDB] ===== Query: Earliest =====\n");
+    tsdb_test_get_earliest();
+
+    /* 查询示例 3: 显示所有 */
+    rt_kprintf("\n[fdb_tsdb1/TSDB] ===== Query: All Messages =====\n");
+    tsdb_test_dump_all();
+
+    rt_kprintf("\n========== Test Complete ==========\n\n");
+}
+
+/* ============ TSDB 查询接口 ============ */
+
+/* 用于保存查询结果 */
+static struct {
+    fdb_tsl_t tsl;
+    char       data[TSDB_MAX_LOG_LEN + 1];
+    char       dt_buf[DT_BUF_SIZE];
+    bool       found;
+} s_query_result = {0};
+
+/**
+ * @brief  获取 TSDB 中最新一条记录的回调（反向遍历，最先遇到的就是最新的）
+ */
+static bool get_latest_cb(fdb_tsl_t tsl, void *arg)
+{
+    struct fdb_blob blob;
+    (void)arg;
+
+    memset(s_query_result.data, 0, sizeof(s_query_result.data));
+    fdb_tsl_to_blob(tsl, fdb_blob_make(&blob, s_query_result.data, TSDB_MAX_LOG_LEN));
+    fdb_blob_read((fdb_db_t)&s_tsdb, &blob);
+    unix_sec_to_datetime((uint32_t)tsl->time, s_query_result.dt_buf, sizeof(s_query_result.dt_buf));
+
+    s_query_result.tsl = tsl;
+    s_query_result.found = true;
+
+    return true;  /* 返回 true 停止遍历 */
+}
+
+/**
+ * @brief  获取 TSDB 中最早一条记录的回调（正向遍历，最先遇到的就是最早的）
+ */
+static bool get_earliest_cb(fdb_tsl_t tsl, void *arg)
+{
+    struct fdb_blob blob;
+    (void)arg;
+
+    memset(s_query_result.data, 0, sizeof(s_query_result.data));
+    fdb_tsl_to_blob(tsl, fdb_blob_make(&blob, s_query_result.data, TSDB_MAX_LOG_LEN));
+    fdb_blob_read((fdb_db_t)&s_tsdb, &blob);
+    unix_sec_to_datetime((uint32_t)tsl->time, s_query_result.dt_buf, sizeof(s_query_result.dt_buf));
+
+    s_query_result.tsl = tsl;
+    s_query_result.found = true;
+
+    return true;  /* 返回 true 停止遍历 */
+}
+
+/**
+ * @brief  获取 TSDB 中最新一条记录
+ */
+void tsdb_test_get_latest(void)
+{
+    if (!s_init_ok) {
+        rt_kprintf("[TSDB] Not initialized!\n");
+        return;
+    }
+
+    s_query_result.found = false;
+    /* 反向遍历，最先遇到的就是最新的一条 */
+    fdb_tsl_iter_reverse(&s_tsdb, get_latest_cb, NULL);
+
+    if (s_query_result.found) {
+        rt_kprintf("[fdb_tsdb1/TSDB] [LATEST] time=%s  len=%u  data: %s\n",
+                   s_query_result.dt_buf,
+                   (unsigned)s_query_result.tsl->log_len,
+                   s_query_result.data);
+    } else {
+        rt_kprintf("[fdb_tsdb1/TSDB] No data found!\n");
+    }
+}
+
+/**
+ * @brief  获取 TSDB 中最早一条记录
+ */
+void tsdb_test_get_earliest(void)
+{
+    if (!s_init_ok) {
+        rt_kprintf("[TSDB] Not initialized!\n");
+        return;
+    }
+
+    s_query_result.found = false;
+    /* 正向遍历，最先遇到的就是最早的一条 */
+    fdb_tsl_iter(&s_tsdb, get_earliest_cb, NULL);
+
+    if (s_query_result.found) {
+        rt_kprintf("[fdb_tsdb1/TSDB] [EARLIEST] time=%s  len=%u  data: %s\n",
+                   s_query_result.dt_buf,
+                   (unsigned)s_query_result.tsl->log_len,
+                   s_query_result.data);
+    } else {
+        rt_kprintf("[fdb_tsdb1/TSDB] No data found!\n");
+    }
+}
+
+MSH_CMD_EXPORT(tsdb_test_get_latest, get latest TSL from TSDB);
+MSH_CMD_EXPORT(tsdb_test_get_earliest, get earliest TSL from TSDB);
+
+/* ============ 简化版 TSDB 测试 ============ */
+
+void tsdb_test_simple(void)
+{
+    fdb_err_t err;
+    char msg_buf[64] = {0};
+    int32_t msg_count = 0;
+
+    rt_kprintf("\n========== TSDB Simple Test (fdb_tsdb1) ==========\n");
+
+    /* 1. 初始化 TSDB */
+    err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                        tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+    if (err != FDB_NO_ERR) {
+        rt_kprintf("[fdb_tsdb1/TSDB] Init failed (err=%d), erasing and retry...\n", err);
+        const struct fal_partition *tsdb_part = fal_partition_find(TSDB_PART_NAME);
+        if (tsdb_part != NULL) {
+            fal_partition_erase_all(tsdb_part);
+        }
+        err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                            tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+        if (err != FDB_NO_ERR) {
+            rt_kprintf("[fdb_tsdb1/TSDB] Init still failed, err=%d\n", err);
+            return;
+        }
+    }
+    s_init_ok = true;
+    rt_kprintf("[fdb_tsdb1/TSDB] Init OK\n");
+
+    /* 2. 从最新一条消息里解析编号，+1 生成新消息 */
+    s_query_result.found = false;
+    fdb_tsl_iter_reverse(&s_tsdb, get_latest_cb, NULL);
+    if (s_query_result.found) {
+        if (sscanf(s_query_result.data, "this is No.%ld message", &msg_count) != 1) {
+            msg_count = 0;
+        }
+        rt_kprintf("[fdb_tsdb1/TSDB] Last msg: %s\n", s_query_result.data);
+    } else {
+        msg_count = 0;
+        rt_kprintf("[fdb_tsdb1/TSDB] No existing data\n");
+    }
+
+    /* 3. 生成新消息并保存 */
+    msg_count++;
+    rt_snprintf(msg_buf, sizeof(msg_buf), "this is No.%d message", msg_count);
+    rt_kprintf("[fdb_tsdb1/TSDB] Saving: %s\n", msg_buf);
+    if (tsdb_test_save(msg_buf, strlen(msg_buf)) != 0) {
+        rt_kprintf("[fdb_tsdb1/TSDB] Save failed!\n");
+        return;
+    }
+
+    /* 4. 读取最新一条并显示 */
+    rt_kprintf("\n[fdb_tsdb1/TSDB] ===== Latest Message =====\n");
+    tsdb_test_get_latest();
+
+    rt_kprintf("\n========== Test Complete ==========\n\n");
+}
+
+/* ============ 重置 TSDB（擦除分区 + 重置编号） ============ */
+
+void tsdb_test_reset(void)
+{
+    fdb_err_t err;
+    const struct fal_partition *part;
+
+    rt_kprintf("\n========== TSDB Reset ==========\n");
+    rt_kprintf("[fdb_tsdb1/TSDB] Erasing fdb_tsdb1 partition...\n");
+
+    part = fal_partition_find(TSDB_PART_NAME);
+    if (part == NULL) {
+        rt_kprintf("[fdb_tsdb1/TSDB] ERROR: partition '%s' not found!\n", TSDB_PART_NAME);
+        return;
+    }
+
+    if (fal_partition_erase_all(part) < 0) {
+        rt_kprintf("[fdb_tsdb1/TSDB] ERROR: erase failed!\n");
+        return;
+    }
+    rt_kprintf("[fdb_tsdb1/TSDB] Erase OK\n");
+
+    /* 重新初始化 TSDB */
+    s_init_ok = false;
+    err = fdb_tsdb_init(&s_tsdb, TSDB_NAME, TSDB_PART_NAME,
+                        tsdb_test_get_time, TSDB_MAX_LOG_LEN, NULL);
+    if (err != FDB_NO_ERR) {
+        rt_kprintf("[fdb_tsdb1/TSDB] Re-init failed, err=%d\n", err);
+        return;
+    }
+    s_init_ok = true;
+    rt_kprintf("[fdb_tsdb1/TSDB] Re-init OK, No. counter reset to 0\n");
+
+    rt_kprintf("\n========== Reset Complete ==========\n\n");
+}
+
+MSH_CMD_EXPORT(tsdb_test_reset, reset TSDB: erase partition and restart count);
 
 /* ============ global variables ============ */
 
@@ -189,6 +523,7 @@ int tsdb_test_save(const char *msg, uint16_t len)
 
     err = fdb_tsl_append(&s_tsdb, fdb_blob_make(&blob, (void *)msg, len));
     if (err != FDB_NO_ERR) {
+        rt_kprintf("[TSDB] SAVE FAILED! err=%d\n", err);
         return -2;
     }
 
@@ -374,3 +709,57 @@ void tsdb_test_start_sender(void)
         rt_kprintf("[TSDB] sender task create failed!\n");
     }
 }
+
+/* ============ FAL 分区测试 ============ */
+
+void fal_part_test(void)
+{
+    const struct fal_partition *table;
+    const struct fal_partition *part;
+    size_t len, i;
+    const char *names[] = {"boot", "app", "fdb_tsdb1", "fdb_kvdb1"};
+    int all_ok = 1;
+
+    rt_kprintf("\n========== FAL Partition Test ==========\n");
+
+    table = fal_get_partition_table(&len);
+    if (table == NULL || len == 0) {
+        rt_kprintf("[Part Test] ERROR: partition table is empty!\n");
+        return;
+    }
+
+    rt_kprintf("\n[Part List] total %u partitions:\n", (unsigned)len);
+    for (i = 0; i < len; i++) {
+        rt_kprintf("  [%u] %-12s  flash=%-12s  offset=0x%08X  size=%8u (%u KB)\n",
+                   (unsigned)i,
+                   table[i].name,
+                   table[i].flash_name,
+                   (unsigned)table[i].offset,
+                   (unsigned)table[i].len,
+                   (unsigned)(table[i].len / 1024));
+    }
+
+    rt_kprintf("\n[Partition Exist Check]\n");
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        part = fal_partition_find(names[i]);
+        if (part == NULL) {
+            rt_kprintf("  [FAIL] %-12s NOT FOUND!\n", names[i]);
+            all_ok = 0;
+        } else {
+            rt_kprintf("  [OK]   %-12s  offset=0x%08X  size=%u KB\n",
+                       names[i],
+                       (unsigned)part->offset,
+                       (unsigned)(part->len / 1024));
+        }
+    }
+
+    if (all_ok) {
+        rt_kprintf("\n[Result] All partitions exist and accessible!\n");
+    } else {
+        rt_kprintf("\n[Result] Some partitions are missing!\n");
+    }
+
+    rt_kprintf("\n========== FAL Partition Test End ==========\n\n");
+}
+
+MSH_CMD_EXPORT_ALIAS(fal_part_test, fal_test, test all FAL partitions);

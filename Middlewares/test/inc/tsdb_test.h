@@ -67,4 +67,24 @@ void tsdb_test_normal_msg(void);
  */
 void tsdb_test_start_sender(void);
 
+/* ============ FAL 分区测试 ============ */
+
+/**
+ * @brief   测试 FAL 分区是否正常：列出所有分区
+ * @note    must call after fal_init()
+ */
+void fal_part_test(void);
+
+/**
+ * @brief   简化版 TSDB 测试：存一条消息 + 读最新一条
+ * @note    must call after fal_init()
+ */
+void tsdb_test_simple(void);
+
+/**
+ * @brief   擦除 fdb_tsdb1 分区并重置编号
+ * @note    must call after fal_init()
+ */
+void tsdb_test_reset(void);
+
 #endif /* __TSDB_TEST_H__ */

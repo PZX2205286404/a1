@@ -182,16 +182,9 @@ int main(void)
   /* Initialize all configured peripherals */
 	MX_RTC_Init();              /* 硬件 RTC 初始化，使 RTC 开始走时 */
 	fal_init();
-	littlefs_test();
-//	flashdb_init_demo();
-//	flashdb_demo();
+	fal_part_test();           /* FAL 分区测试：列出分区 */
+	tsdb_test_simple();        /* 简化版 TSDB 测试：存一条 + 读最新一条 */
 
-	/* TSDB test module init */
-	//tsdb_test_erase_flash(NULL);
-	tsdb_test_init();
-	tsdb_test_run_all();
-	/* ????????????? */
-	tsdb_test_start_sender();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */

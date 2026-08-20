@@ -26,8 +26,10 @@ extern struct fal_flash_dev nor_flash0;
 /* partition table */
 #define FAL_PART_TABLE                                                                 \
 {                                                                                      \
-    {FAL_PART_MAGIC_WORD,  "fdb_tsdb1",       "norflash0",           0, 1024*1024, 0}, \
-    {FAL_PART_MAGIC_WORD,  "fdb_kvdb1",       "norflash0",   1024*1024, 1024*1024, 0}, \
+    {FAL_PART_MAGIC_WORD,  "boot",            "norflash0",           0,  256*1024, 0}, \
+    {FAL_PART_MAGIC_WORD,  "app",             "norflash0",   256*1024,  512*1024, 0}, \
+    {FAL_PART_MAGIC_WORD,  "fdb_tsdb1",       "norflash0",   768*1024, 1024*1024, 0}, \
+    {FAL_PART_MAGIC_WORD,  "fdb_kvdb1",       "norflash0",  1792*1024, 1024*1024, 0}, \
 }
 #endif /* FAL_PART_HAS_TABLE_CFG */
 
